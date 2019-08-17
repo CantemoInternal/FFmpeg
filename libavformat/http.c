@@ -45,7 +45,7 @@
 /* The IO buffer size is unrelated to the max URL size in itself, but needs
  * to be large enough to fit the full request headers (including long
  * path names). */
-#define BUFFER_SIZE   MAX_URL_SIZE
+#define BUFFER_SIZE   1024*1042
 #define MAX_REDIRECTS 8
 #define HTTP_SINGLE   1
 #define HTTP_MUTLI    2
@@ -1391,13 +1391,32 @@ static int http_buf_read(URLContext *h, uint8_t *buf, int size)
         uint64_t target_end = s->end_off ? s->end_off : s->filesize;
         if ((!s->willclose || s->chunksize == UINT64_MAX) && s->off >= target_end)
             return AVERROR_EOF;
-        len = ffurl_read(s->hd, buf, size);
+
+	// if we can fit the wanted data into the buffer then do that
+        if (s->buf_ptr - s->buffer + size < sizeof(s->buffer)) {
+          len = ffurl_read(s->hd, s->buf_ptr, sizeof(s->buffer)-(s->buf_ptr - s->buffer));
+          if (len > 0)
+            s->buf_end = s->buf_ptr + len;
+        } else {
+          // otherwise start on a new buffer
+          len = ffurl_read(s->hd, s->buffer, sizeof(s->buffer));
+          if (len > 0) {
+            s->buf_ptr = s->buffer;
+            s->buf_end = s->buffer + len;
+          }
+        }
         if (!len && (!s->willclose || s->chunksize == UINT64_MAX) && s->off < target_end) {
             av_log(h, AV_LOG_ERROR,
                    "Stream ends prematurely at %"PRIu64", should be %"PRIu64"\n",
                    s->off, target_end
                   );
             return AVERROR(EIO);
+        }
+        if (len > 0) {
+          if (len > size)
+            len = size;
+          memcpy(buf, s->buf_ptr, len);
+          s->buf_ptr += len;
         }
     }
     if (len > 0) {
@@ -1683,8 +1702,25 @@ static int64_t http_seek_internal(URLContext *h, int64_t off, int whence, int fo
         return AVERROR(EINVAL);
     if (off < 0)
         return AVERROR(EINVAL);
-    s->off = off;
 
+
+    /* If the seek is to within the buffered data, then reuse it */
+
+    // off - the requested offset to seek to
+    // s->off - what offset s-buf_ptr currently points to
+
+    // s->off - (s->buf_ptr - s->buffer) - the byte offset of s->buffer
+    // s->off + (s->buf_end - s->buf_ptr) - the byte offset of s->buf_end
+
+    // if (off >= beginning of buffer && off < end of buffer)
+
+    if (off >= s->off - (s->buf_ptr - s->buffer) && off < s->off + (s->buf_end - s->buf_ptr)) {
+      s->buf_ptr = s->buf_ptr + off - s->off;
+      s->off = off;
+      return off;
+    }
+
+    s->off = off;
     if (s->off && h->is_streamed)
         return AVERROR(ENOSYS);
 
