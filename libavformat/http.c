@@ -1397,6 +1397,13 @@ static int http_buf_read(URLContext *h, uint8_t *buf, int size)
           len = ffurl_read(s->hd, s->buf_ptr, sizeof(s->buffer)-(s->buf_ptr - s->buffer));
           if (len > 0)
             s->buf_end = s->buf_ptr + len;
+	} else if (size < sizeof(s->buffer)/2) {
+	  // if size is less than half the buffer then shift it and keep the last half of the current buffer
+	  memcpy(s->buffer, s->buffer+sizeof(s->buffer)/2, (s->buf_end-s->buffer-sizeof(s->buffer)/2));
+	  s->buf_ptr -= sizeof(s->buffer)/2;
+          len = ffurl_read(s->hd, s->buf_ptr, sizeof(s->buffer)-(s->buf_ptr - s->buffer));
+          if (len > 0)
+            s->buf_end = s->buf_ptr + len;
         } else {
           // otherwise start on a new buffer
           len = ffurl_read(s->hd, s->buffer, sizeof(s->buffer));
