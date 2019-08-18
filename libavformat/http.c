@@ -1389,24 +1389,27 @@ static int http_buf_read(URLContext *h, uint8_t *buf, int size)
         s->buf_ptr += len;
     } else {
         uint64_t target_end = s->end_off ? s->end_off : s->filesize;
+	uint64_t buf_usage = s->buf_ptr - s->buffer;
+	uint64_t buf_size = sizeof(s->buffer);
         if ((!s->willclose || s->chunksize == UINT64_MAX) && s->off >= target_end)
             return AVERROR_EOF;
 
 	// if we can fit the wanted data into the buffer then do that
-        if (s->buf_ptr - s->buffer + size < sizeof(s->buffer)) {
-          len = ffurl_read(s->hd, s->buf_ptr, sizeof(s->buffer)-(s->buf_ptr - s->buffer));
+        if (buf_usage + size < buf_size) {
+          len = ffurl_read(s->hd, s->buf_ptr, buf_size-buf_usage);
           if (len > 0)
             s->buf_end = s->buf_ptr + len;
-	} else if (size < sizeof(s->buffer)/2) {
+	} else if (size < buf_size/2) {
 	  // if size is less than half the buffer then shift it and keep the last half of the current buffer
-	  memcpy(s->buffer, s->buffer+sizeof(s->buffer)/2, (s->buf_end-s->buffer-sizeof(s->buffer)/2));
-	  s->buf_ptr -= sizeof(s->buffer)/2;
-          len = ffurl_read(s->hd, s->buf_ptr, sizeof(s->buffer)-(s->buf_ptr - s->buffer));
+	  memcpy(s->buffer, s->buffer+buf_size/2, (s->buf_end-s->buffer-buf_size/2));
+	  s->buf_ptr -= buf_size/2;
+	  buf_usage -= buf_size/2;
+          len = ffurl_read(s->hd, s->buf_ptr, buf_size-buf_usage);
           if (len > 0)
             s->buf_end = s->buf_ptr + len;
         } else {
           // otherwise start on a new buffer
-          len = ffurl_read(s->hd, s->buffer, sizeof(s->buffer));
+          len = ffurl_read(s->hd, s->buffer, buf_size);
           if (len > 0) {
             s->buf_ptr = s->buffer;
             s->buf_end = s->buffer + len;
